@@ -4,6 +4,7 @@ from mingus.containers.instrument import MidiInstrument
 from mingus.midi.midi_file_in import MIDI_to_Composition
 from mingus.midi.midi_file_out import write_Composition, write_Track,\
 write_Bar, write_Note
+from mingus.midi import fluidsynth
 from mingus.containers.composition import Composition
 from mingus.containers.track import Track
 from mingus.containers.bar import Bar
@@ -13,6 +14,9 @@ from mingus.core.intervals import measure
 import sys
 from math import floor
 import warnings
+from threading import Thread
+import Queue
+import serial
 
 
 '''Function sets the range and type of instrument.'''
@@ -82,6 +86,7 @@ program <--' % filename)
 
 '''Wrapper function for is_good_track.'''
 def select_tracks(c, bpm, xylo):
+    fluidsynth.init("VintageDreamsWavesv2.sf2")
     for i in range(len(c)):
         if (is_good_track(c[i], bpm, xylo)):
             c.selected_tracks.append(i)
@@ -92,43 +97,51 @@ def select_tracks(c, bpm, xylo):
 what is played by the instrument. Function also acts as a wrapper for 
 play_track_to_user.'''
 def is_good_track(track, bpm, xylo):
-    track.instrument = xylo
     play_track_to_user(track, bpm)
-    '''
-    query user to have them indicate whether or not track should be 
-    included in what gets played by device:
-    
-    # query user until they give an acceptable response
+
+    # query user to have them indicate whether or not track should be 
+    # included in what gets played by device until they give an 
+    # acceptable response
     while (True):
-        response = input('Should this track be included? (\'y\'/\'Y\' = \'yes\', \
-        \'n\'/\'N\' = \'No\') )
+        response = str(raw_input('Should this track be included? (\'y\'/\'Y\'' + \
+'= \'Yes\', \'n\'/\'N\' = \'No\'): ')) 
         if (response == 'y' or response == 'Y'):
             return True
         elif (response == 'n' or response == 'N'):
             return False 
-    '''
-    pass
 
 
 '''Function uses FluidSynth to play a portion of a single track to a user.'''
 def play_track_to_user(track, bpm):
     # TODO: play track to user w/ FluidSynth, either a small portion
     # of it or allow user to exit out of playback 
-    pass
+    t = Thread(target = start_track, args = (track, bpm,))
+    t2 = Thread(target=listen_to_user, args=())
+    t.start()
+    t2.start()
+    # if t ends, kill t2
 
+
+def start_track(track, bpm):
+    # t = Thread(target=listen_to_user, args=())
+    # t.start()
+    print("Playing track... (hit 'a' if you've Already heard enough)")
+    fluidsynth.play_Track(track, 1, bpm)
+    
+
+def listen_to_user():    
+    while 1:
+        if (raw_input() == 'a'):
+            fluidsynth.stop_everything() 
+    
 
 '''Function uses FluidSynth to play a portion of the entire composition to a user.'''
 def play_comp_to_user(c, bpm):
     # TODO: play c to user w/ FluidSynth, either a small portion
     # of it or allow user to exit out of playback
     pass
-    
-
-'''Function uses LilyPond to display the sheet music for the entire 
-composition to a user.'''
-def display_score_to_user(c):
-    # TODO: display c to user w/ LilyPond
-    pass
+    # print("Here's what will be played on the ballophone...")
+    # fluidsynth.play_Composition(c, bpm = bpm)
 
 
 '''
@@ -153,7 +166,10 @@ def rebuild_composition(old, xylo, cutoff):
             dem = b.meter[1]
             for lst in bar:
                 value = lst[1]
-                if (is_garbage(value, dem, cutoff)):
+                if (is_garbage(value, dem, cutoff[old.selected_tracks.index(i)])):
+                    continue
+                # do not include lists without notes
+                if (not lst[2]):
                     continue
                 nc = NoteContainer()
                 for note in lst[2]:
@@ -244,6 +260,9 @@ def transposer(c, lowest, highest, xylo):
 def simple_transpose(c, full, interval, up):
     # determine whether can transpose by a full octave (only want to 
     # transpose to nearest octave)
+    # TODO: introduce recursive calls so track transposes itself 
+    # until it is within range, using full octave jumps unless 
+    # necessary to do half steps
     if (full):
         for i in range(len(c)):
             for j in range(len(c[i])):
@@ -254,14 +273,6 @@ def simple_transpose(c, full, interval, up):
                         else:
                             c[i][j][k][2][l].octave_down()  
     
-    else:
-        for i in range(len(c)):
-            c[i] = c[i].transpose(interval, up)
-    
-    # switch to the below else branch if the above else branch that 
-    # makes use of track.transpose isn't working. the below is far more 
-    # tedious, but it should work 
-    '''
     else: 
         for i in range(len(c)):
             for j in range(len(c[i])):
@@ -272,6 +283,10 @@ def simple_transpose(c, full, interval, up):
                             c[i][j][k][2][l] = n.from_int(Note.__int__(c[i][j][k][2][l]) + interval) 
                         else:
                             c[i][j][k][2][l] = n.from_int(Note.__int__(c[i][j][k][2][l]) - interval) 
+    '''
+    else:
+        for i in range(len(c)):
+            c[i] = c[i].transpose(interval, up)
     '''
              
     return c
@@ -372,10 +387,41 @@ def decode_lsas(lsa_code, lsa_ordering):
     return notes
 
 
-'''Wrapper function for sending playback events to the Arduino.'''
-def send_to_Arduino(pb):
+'''Function for sending playback events to the Arduino.'''
+def send_to_Arduino(pbs):
     # TODO: implement automated communication with Arduino
     pass
+    '''
+    # TODO: replace with actual client information
+    ser = serial.Serial('/dev/tty.usbserial', 9600)
+    wait_for_response()
+    # send time followed by lsa-combo for each pb event
+    for pb in pbs:
+        ser.write(pb[0])
+        ser.write(pb[1])
+    '''
+
+    
+'''Function waits until Arduino declares itself ready.'''
+def wait_for_response():
+    # TODO: implement ability for python program to wait until Arduino
+    # is ready to receive
+    pass
+
+
+def slow_down_composition(c, bpm, step_time):
+    notes_dict = create_dict(c, bpm)
+    smallest = step_time
+    for note in notes_dict:
+        # TODO: vectorize the below
+        diff = [j - i for i, j in zip(notes_dict[note][:-1], notes_dict[note][1:])]
+        if (min(diff) < smallest):
+            smallest = min(diff)
+    print(smallest)
+    if (smallest < step_time):
+        return (smallest / step_time)
+    else:
+        return 1
 
 
 '''Function creates dictionary of lists of times at which notes are
@@ -427,20 +473,31 @@ def main():
     write_log(c, bpm, path_to_log + infile)
     
     # query user to select tracks we actually want from the midi
-    # c.selected_tracks = select_tracks(c, bpm, xylo)
+    c.selected_tracks = select_tracks(c, bpm, xylo)
     
     # INSPECT LOG TO SEE WHICH TRACK NUMBERS YOU WANT INCLUDED AND 
     # PUT THEM INTO THE BELOW LIST
-    c.selected_tracks = [1] # for mhall, only the track at index 1 is to be included
+    # c.selected_tracks = [1] # for mhall, only the track at index 1 is to be included
     
     # ratio of highest note value to keep in composition to beat unit.
     # e.g. if meter is 4/4, then a 'cutoff' of 2 would eliminate any
     # notes whose value exceeds 8 (anything briefer than an eighth note)
-    cutoff = 2
+    cutoff = [8] * len(c.selected_tracks)
     
     # composition containing only the selected tracks, the correct notes, 
     # with everything transposed w/in the range of the instrument
     c = rebuild_composition(c, xylo, cutoff)
+    
+    # seconds it takes for motor to step the necessary amount to drop
+    # a ball
+    step_time = 0.1
+    # multiply BPM by the ratio of smallest gap between 
+    # a note played consecutively and step_time -- only if this number 
+    # is less than 1  
+    # bpm *= slow_down_composition(c, bpm, step_time)
+    # print(bpm)
+    
+    play_comp_to_user(c, bpm)
     
     # check that everything sounds ok with selected tracks, removed notes,
     # and transposition 
@@ -448,21 +505,17 @@ def main():
     write_Composition(path_to_midi + outfile, c, bpm)
     
     # TODO: replace with actual ordering once known. ordering by 
-    # order of encounter from ball's perspective
+    # distance from device center
     lsa_ordering = ['F-3', 'F#-3', 'G-3', 'G#-3', 'A-3', 'A#-3', 'B-3', 
                     'C-4', 'C#-4', 'D-4', 'D#-4', 'E-4', 'F-4', 'F#-4', 
                     'G-4', 'G#-4', 'A-4', 'A#-4', 'B-4', 'C-5', 'C#-5', 
                     'D-5', 'D#-5', 'E-5', 'F-5', 'F#-5', 'G-5', 'G#-5', 
                     'A-5', 'A#-5', 'B-5', 'C-6', 'C#-6', 'D-6', 'D#-6', 
                     'E-6', 'F-6']
+    # don't need to pass xylo here -- range contained in c[0]
     pb = create_playback_events(c, bpm, xylo, lsa_ordering)
     send_to_Arduino(pb)
     write_log(c, bpm, path_to_log + outfile, pb)
-    
-    play_comp_to_user(c, bpm)
-    # optionally, display sheet music of the composition for further
-    # diagnostics
-    display_score_to_user(c)
     
 
 if __name__ == "__main__": main()
