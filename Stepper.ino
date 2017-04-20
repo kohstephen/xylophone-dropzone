@@ -1,3 +1,5 @@
+// author: Sophia Dolan
+
 #include <Stepper.h>
 
 const int stepsPerRevolution = 48; //7.5 deg per step
