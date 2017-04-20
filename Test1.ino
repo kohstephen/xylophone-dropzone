@@ -1,3 +1,5 @@
+// author: Sophia Dolan
+
 int latchPin = 8;
 int clockPin = 12;
 int dataPin = 11;
