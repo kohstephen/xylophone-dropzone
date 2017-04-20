@@ -1,3 +1,5 @@
+#author: Sophia Dolan
+
 #Use python2
 
 from time import sleep
